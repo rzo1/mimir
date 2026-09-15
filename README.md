@@ -204,6 +204,11 @@ Configured in [`excludes.txt`](excludes.txt) — comment a line out to include i
   the cloud, and reading online-only files would download all of it)
 - large and re-downloadable: the Trash, the Docker Desktop VM disk (**including
   Docker volumes** — export those first) and Ollama models
+- build output and dependencies, which are millions of tiny files and slow to
+  copy: `node_modules/` (except nvm's global packages), Maven/sbt/Cargo
+  `target/` (except folders named `target` inside `src/`) and Python `.venv/`.
+  `build/` is kept on purpose: it is often real source code (Java or Python
+  packages named `build`)
 
 Files that iCloud has "optimized" away (Desktop & Documents sync, Photos with
 *Optimize Mac Storage*) are placeholders on disk; reading them downloads them,

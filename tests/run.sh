@@ -61,6 +61,17 @@ make_home() {
   ln -s .zshrc "$h/zshrc-link"
   ln "$h/.zshrc" "$h/zshrc-hardlink"
   if command -v xattr >/dev/null 2>&1; then xattr -w com.example.tag blue "$h/My Docs/file 1.txt"; fi
+  # build output (excluded) next to source folders with the same names (kept)
+  mkdir -p "$h/web/node_modules/left-pad" "$h/.nvm/versions/node/v22.1.0/lib/node_modules/npm" \
+    "$h/proj/target/classes" "$h/proj/src/main/java/org/example/target" "$h/proj/src/target" "$h/proj/build"
+  echo 'module' >"$h/web/node_modules/left-pad/index.js"
+  echo 'global npm' >"$h/.nvm/versions/node/v22.1.0/lib/node_modules/npm/package.json"
+  echo 'class' >"$h/proj/target/classes/App.class"
+  echo 'source' >"$h/proj/src/main/java/org/example/target/Target.java"
+  echo 'source' >"$h/proj/src/target/Other.java"
+  echo 'gradle' >"$h/proj/build/output.txt"
+  mkdir -p "$h/py/.venv/lib/python3.13/site-packages" && echo 'pkg' >"$h/py/.venv/lib/python3.13/site-packages/mod.py"
+  echo 'print(1)' >"$h/py/main.py"
 }
 
 # mimir_run [args…] — run Mímir non-interactively against $T/home → $T/dst
@@ -144,6 +155,14 @@ test_home_mirror() {
   assert_missing "$h/Library/Caches/com.example"
   assert_missing "$h/.Trash"
   assert_missing "$h/Library/CloudStorage"
+  assert_missing "$h/web/node_modules"
+  assert_missing "$h/proj/target"
+  assert_file "$h/.nvm/versions/node/v22.1.0/lib/node_modules/npm/package.json"
+  assert_file "$h/proj/src/main/java/org/example/target/Target.java"
+  assert_file "$h/proj/src/target/Other.java"
+  assert_file "$h/proj/build/output.txt"
+  assert_missing "$h/py/.venv"
+  assert_file "$h/py/main.py"
   assert_eq "$(readlink "$h/zshrc-link")" ".zshrc" "symlink kept"
   assert_eq "$(stat -f %i "$h/.zshrc")" "$(stat -f %i "$h/zshrc-hardlink")" "hard link kept"
   assert_eq "$(stat -f %Lp "$h/.ssh/id_test")" "600" "permissions kept"
@@ -244,6 +263,8 @@ test_openrsync_fallback() {
   assert_contains out.txt "openrsync"
   assert_file "$(backup_dir)/home/My Docs/file 1.txt"
   assert_missing "$(backup_dir)/home/Library/Caches/com.example"
+  assert_missing "$(backup_dir)/home/proj/target"
+  assert_file "$(backup_dir)/home/proj/src/main/java/org/example/target/Target.java"
 }
 
 test_system_paths() {
