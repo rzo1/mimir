@@ -126,10 +126,10 @@ all steps. Or pass the disk directly: `./mimir /Volumes/data`.
   checked out of that total (rsync needs roughly 1–2 GB of RAM for millions of
   files). On a re-run most files are already there, so progress moves fast
   while little data is copied.
-- The end of the line shows what rsync is doing right now (`copying`,
-  `fixing timestamps`, `creating folder`, `deleting` …) and where. rsync reports
-  progress only while it copies file contents, so during long stretches of
-  metadata work the numbers stand still while the activity keeps moving. On
+- The end of the line shows what rsync is doing right now and where:
+  `checking` (already up to date), `copying`, `updating`, `fixing timestamps`,
+  `creating folder`, `deleting` … The counter moves with every checked entry,
+  also while rsync only confirms that files are already in the backup. On
   narrow terminals less important parts (bar, speed, …) are left out.
 - Folders with many tiny files (`~/.m2`, `node_modules`, generated docs) are
   slow on external disks: every file costs several writes, whatever its size.

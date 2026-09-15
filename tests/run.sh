@@ -424,23 +424,27 @@ test_progress_renderer() {
   assert_contains "$T/status" "home finished"
 }
 
-# rsync stays silent while it only fixes metadata: the log follower and the heartbeat keep the line
-# alive and show what is going on
+# rsync prints progress only while copying; the per-entry lines (--info=name2) keep counter and
+# activity moving while it checks up-to-date files or fixes metadata
 test_progress_renderer_shows_current_activity() {
   {
-    printf '12581 files to consider\n'
-    printf '     18,00M  10%%   15,05MB/s    0:00:10 (xfr#2000, to-chk=10136/12581)\n'
-    printf '@log 2026/09/15 14:26:09 [90152] .d..t...... IdeaProjects/app/node_modules/@scope/pkg/dist/\n'
-    printf '@log 2026/09/15 14:26:09 [90152] rsync: [sender] something went wrong\n'
+    printf '6 files to consider\n'
+    printf '.d          ./\n'
+    printf '.f          Documents/unchanged.txt\n'
+    printf '.d..t...... Documents/Projects/\n'
     printf '@tick\n'
-    printf '@log 2026/09/15 14:26:10 [90152] >f+++++++++ Documents/Übersicht Ärzte.pdf\n'
-    printf '@log 2026/09/15 14:26:11 [90152] *deleting   old stuff/file.txt\n'
+    printf '>f+++++++++ Documents/Übersicht Ärzte.pdf\n'
+    printf '     18,00M  50%%   15,05MB/s    0:00:10 (xfr#1, to-chk=2/6)\n'
+    printf '*deleting   old stuff/file.txt\n'
+    printf 'cL+++++++++ link -> target\n'
   } | LC_ALL=C awk -f "$ROOT/lib/progress.awk" -v label=home -v tty=1 -v cols=200 -v throttle=0 |
     LC_ALL=C tr '\r' '\n' >out.txt
-  assert_contains out.txt "files 2445/12.6k .* │ fixing timestamps: IdeaProjects/app/node_modules/@scope/pkg/dist/"
-  assert_not_contains out.txt "something went wrong"
-  assert_contains out.txt "│ copying: Documents/Übersicht Ärzte.pdf"
-  assert_contains out.txt "│ deleting: old stuff/file.txt"
+  assert_contains out.txt " 16.7% │ files 1/6 .*│ checking: ./"
+  assert_contains out.txt " 33.3% │ files 2/6 .*│ checking: Documents/unchanged.txt"
+  assert_contains out.txt " 50.0% │ files 3/6 .*│ fixing timestamps: Documents/Projects/"
+  assert_contains out.txt " 66.7% │ files 4/6 .*│ copying: Documents/Übersicht Ärzte.pdf"
+  assert_contains out.txt " 66.7% │ files 4/6 .*│ deleting: old stuff/file.txt"
+  assert_contains out.txt " 83.3% │ files 5/6 .*│ creating link: link -> target"
 }
 
 test_progress_renderer_fits_the_terminal() {
@@ -449,7 +453,7 @@ test_progress_renderer_fits_the_terminal() {
     {
       printf '5240000 files to consider\n'
       printf '    115,20G  40%%  110,25MB/s    0:27:10 (xfr#2000, to-chk=3130000/5240000)\n'
-      printf '@log 2026/09/15 14:26:09 [90152] .d..t...... Documents/Überordner/%s/\n' "$(printf 'sehr-langer-ordnername-%.0s' 1 2 3 4 5 6 7 8)"
+      printf '.d..t...... Documents/Überordner/%s/\n' "$(printf 'sehr-langer-ordnername-%.0s' 1 2 3 4 5 6 7 8)"
     } | LC_ALL=C awk -f "$ROOT/lib/progress.awk" -v label=home -v tty=1 -v cols="$cols" -v throttle=0 |
       LC_ALL=C tr '\r' '\n' | sed 's/\x1b\[K//g' | grep '│' >"lines-$cols.txt"
     # every drawn line (4 spaces indent included) must fit, counting characters, not bytes
