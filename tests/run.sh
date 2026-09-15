@@ -403,12 +403,49 @@ test_progress_renderer() {
   assert_contains "$T/status" "home finished"
 }
 
+# rsync stays silent while it only fixes metadata: the log follower and the heartbeat keep the line
+# alive and show what is going on
+test_progress_renderer_shows_current_activity() {
+  {
+    printf '12581 files to consider\n'
+    printf '     18,00M  10%%   15,05MB/s    0:00:10 (xfr#2000, to-chk=10136/12581)\n'
+    printf '@log 2026/09/15 14:26:09 [90152] .d..t...... IdeaProjects/app/node_modules/@scope/pkg/dist/\n'
+    printf '@log 2026/09/15 14:26:09 [90152] rsync: [sender] something went wrong\n'
+    printf '@tick\n'
+    printf '@log 2026/09/15 14:26:10 [90152] >f+++++++++ Documents/Übersicht Ärzte.pdf\n'
+    printf '@log 2026/09/15 14:26:11 [90152] *deleting   old stuff/file.txt\n'
+  } | LC_ALL=C awk -f "$ROOT/lib/progress.awk" -v label=home -v tty=1 -v cols=200 -v throttle=0 |
+    LC_ALL=C tr '\r' '\n' >out.txt
+  assert_contains out.txt "files 2445/12.6k .* │ fixing timestamps: IdeaProjects/app/node_modules/@scope/pkg/dist/"
+  assert_not_contains out.txt "something went wrong"
+  assert_contains out.txt "│ copying: Documents/Übersicht Ärzte.pdf"
+  assert_contains out.txt "│ deleting: old stuff/file.txt"
+}
+
+test_progress_renderer_fits_the_terminal() {
+  local cols
+  for cols in 80 100 125 160; do
+    {
+      printf '5240000 files to consider\n'
+      printf '    115,20G  40%%  110,25MB/s    0:27:10 (xfr#2000, to-chk=3130000/5240000)\n'
+      printf '@log 2026/09/15 14:26:09 [90152] .d..t...... Documents/Überordner/%s/\n' "$(printf 'sehr-langer-ordnername-%.0s' 1 2 3 4 5 6 7 8)"
+    } | LC_ALL=C awk -f "$ROOT/lib/progress.awk" -v label=home -v tty=1 -v cols="$cols" -v throttle=0 |
+      LC_ALL=C tr '\r' '\n' | sed 's/\x1b\[K//g' | grep '│' >"lines-$cols.txt"
+    # every drawn line (4 spaces indent included) must fit, counting characters, not bytes
+    local widest
+    widest=$(LC_ALL=C awk '{ c = $0; n = length($0) - gsub(/[\200-\277]/, "", c); if (n > w) w = n } END { print w + 0 }' "lines-$cols.txt")
+    [ "$widest" -lt "$cols" ] || fail "line of $widest columns on a $cols-column terminal: $(tail -1 "lines-$cols.txt")"
+  done
+  assert_contains lines-160.txt "fixing timestamps: …"
+  assert_contains lines-80.txt "fixing timestamps"
+}
+
 test_progress_renderer_narrow_terminal_has_no_bar() {
   printf '     18,00M  10%%   15,05MB/s    0:00:10 (xfr#2000, to-chk=10136/12581)\n' |
     LC_ALL=C awk -f "$ROOT/lib/progress.awk" -v label=home -v tty=1 -v cols=80 | LC_ALL=C tr '\r' '\n' >out.txt
   assert_not_contains out.txt "█"
   assert_not_contains out.txt "/s)"
-  assert_contains out.txt " 19.4% │ files 2445/12.6k │ 18.00M │"
+  assert_contains out.txt " 19.4% │ files 2445/12.6k │ 18.00M copied │ 15.05MB/s │ 0m10s │ ETA 0m41s"
 }
 
 # --- runner ------------------------------------------------------------------------------------------

@@ -126,7 +126,7 @@ LOG_DIR="$HOST_DIR/logs"
 STATUS_FILE="$HOST_DIR/.progress"
 TS=$(date +%Y%m%d-%H%M%S)
 START=$(date +%s)
-RUN_LOG=""
+RUN_LOG="" BG_PIDS=""
 
 # ---------------------------------------------------------------------------------------------------
 check_destination() {
@@ -183,6 +183,9 @@ on_interrupt() {
 
 cleanup() {
   spin_interrupt
+  # shellcheck disable=SC2086  # list of PIDs
+  [ -z "$BG_PIDS" ] || kill $BG_PIDS 2>/dev/null
+  rm -f "${TMPDIR:-/tmp}/mimir-$$-"*.fifo
   [ "$(cat "$HOST_DIR/.lock" 2>/dev/null)" = "$$" ] && rm -f "$HOST_DIR/.lock" "$STATUS_FILE"
 }
 

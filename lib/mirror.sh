@@ -69,11 +69,9 @@ run_rsync() {
 
   info "log: $log"
   if [ "$RSYNC_FLAVOR" = samba ]; then
-    local tty=0 cols=80
-    if [ -t 1 ]; then tty=1; cols=$(stty size </dev/tty 2>/dev/null | awk '{ print $2 }'); fi
-    "$RSYNC" "${opts[@]}" --log-file="$log" --log-file-format='%i %n%L' "$@" "$dst" 2>"$errlog" |
-      LC_ALL=C awk -f "$SCRIPT_DIR/lib/progress.awk" -v label="$label" -v status="$STATUS_FILE" -v tty="$tty" -v cols="$cols"
-    rc=${PIPESTATUS[0]}
+    run_rsync_with_progress "$label" "$log" "$errlog" "${opts[@]}" --log-file="$log" --log-file-format='%i %n%L' \
+      "$@" "$dst"
+    rc=$?
   else
     spin_start "copying with openrsync (no progress available – brew install rsync)"
     "$RSYNC" "${opts[@]}" -i "$@" "$dst" >"$log" 2>"$errlog" || rc=$?
@@ -93,6 +91,45 @@ run_rsync() {
   esac
   [ -s "$errlog" ] || rm -f "$errlog"
   return 0
+}
+
+# run_rsync_with_progress LABEL LOG ERRLOG rsync-args… — returns rsync's exit code
+#
+# rsync prints progress only while it copies file contents, so during long stretches of metadata
+# work (fixing folder timestamps, creating links) its output stops. The renderer therefore reads
+# three merged sources through a named pipe: rsync's output, new lines of rsync's log file (what
+# is happening right now) and a heartbeat every 2 seconds.
+run_rsync_with_progress() {
+  local label="$1" log="$2" errlog="$3"; shift 3
+  local tty=0 cols=80 fifo rc
+  if [ -t 1 ]; then tty=1; cols=$(stty size </dev/tty 2>/dev/null | awk '{ print $2 }'); fi
+  fifo="${TMPDIR:-/tmp}/mimir-$$-$label.fifo"
+  rm -f "$fifo"; mkfifo "$fifo" || { err "cannot create $fifo"; return 1; }
+
+  LC_ALL=C awk -f "$SCRIPT_DIR/lib/progress.awk" -v label="$label" -v status="$STATUS_FILE" \
+    -v tty="$tty" -v cols="$cols" <"$fifo" &
+  local renderer=$!
+  exec 3>"$fifo"
+  : >>"$log"
+  tail -n 0 -F "$log" 2>/dev/null > >(LC_ALL=C sed -l 's/^/@log /' >&3) &
+  local follower=$!
+  ( while sleep 2; do echo "@tick" || exit 0; done ) >&3 &
+  local heartbeat=$!
+  # background jobs ignore Ctrl-C in scripts; cleanup() in the main script kills what is registered
+  # shellcheck disable=SC2034
+  BG_PIDS="$renderer $follower $heartbeat"
+
+  "$RSYNC" "$@" >&3 2>"$errlog"
+  rc=$?
+
+  kill "$follower" "$heartbeat" 2>/dev/null
+  wait "$follower" "$heartbeat" 2>/dev/null
+  exec 3>&-
+  wait "$renderer"
+  # shellcheck disable=SC2034
+  BG_PIDS=""
+  rm -f "$fifo"
+  return "$rc"
 }
 
 run_home() {
