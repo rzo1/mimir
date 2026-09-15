@@ -27,7 +27,7 @@ fail() { printf '%s\n' "$*" >&2; return 1; }
 skip() { printf 'SKIP: %s\n' "$*"; exit 77; }
 assert_file()       { [ -f "$1" ] || fail "expected file: $1"; }
 assert_dir()        { [ -d "$1" ] || fail "expected directory: $1"; }
-assert_missing()    { [ ! -e "$1" ] && [ ! -L "$1" ] || fail "expected not to exist: $1"; }
+assert_missing()    { if [ -e "$1" ] || [ -L "$1" ]; then fail "expected not to exist: $1"; fi; }
 assert_eq()         { [ "$1" = "$2" ] || fail "expected '$2', got '$1'${3:+ ($3)}"; }
 assert_contains()   { grep -q -- "$2" "$1" || { fail "'$1' should contain '$2'"; sed 's/^/  | /' "$1" >&2; return 1; }; }
 assert_not_contains() { ! grep -q -- "$2" "$1" || { fail "'$1' should not contain '$2'"; return 1; }; }
