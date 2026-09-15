@@ -36,8 +36,12 @@ build_rsync_opts() {
     RSYNC_OPTS+=(--no-specials --no-devices --human-readable --partial-dir=.rsync-partial
                  --no-inc-recursive --info=progress2,flist2,stats2,nonreg0)
     if [ "$native" = 1 ]; then
-      # SIP/TCC-owned attributes can never be written by a normal user → would only produce errors
-      rsync_supports xattrs && RSYNC_OPTS+=(-X --filter='-x com.apple.rootless' --filter='-x com.apple.macl')
+      # SIP/TCC-owned attributes can never be written by a normal user → would only produce errors.
+      # com.apple.provenance is stamped by macOS on everything rsync creates in the backup; the
+      # originals don't have it, so without this filter every re-run rewrites the attributes of
+      # every file and directory (hours to days on an external disk).
+      rsync_supports xattrs && RSYNC_OPTS+=(-X --filter='-x com.apple.rootless' --filter='-x com.apple.macl'
+                                            --filter='-x com.apple.provenance')
       rsync_supports ACLs && RSYNC_OPTS+=(-A)
       rsync_supports crtimes && RSYNC_OPTS+=(-N)
     fi
@@ -68,7 +72,7 @@ run_rsync() {
     local tty=0 cols=80
     if [ -t 1 ]; then tty=1; cols=$(stty size </dev/tty 2>/dev/null | awk '{ print $2 }'); fi
     "$RSYNC" "${opts[@]}" --log-file="$log" --log-file-format='%i %n%L' "$@" "$dst" 2>"$errlog" |
-      awk -f "$SCRIPT_DIR/lib/progress.awk" -v label="$label" -v status="$STATUS_FILE" -v tty="$tty" -v cols="$cols"
+      LC_ALL=C awk -f "$SCRIPT_DIR/lib/progress.awk" -v label="$label" -v status="$STATUS_FILE" -v tty="$tty" -v cols="$cols"
     rc=${PIPESTATUS[0]}
   else
     spin_start "copying with openrsync (no progress available – brew install rsync)"

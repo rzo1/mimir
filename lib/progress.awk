@@ -1,5 +1,5 @@
 # Renders rsync --info=progress2,flist2 output as one live status line and mirrors it to a status file.
-# Usage: rsync ... | awk -f progress.awk -v label=home -v status=FILE -v tty=1 -v cols=120 [-v throttle=0]
+# Usage: rsync ... | LC_ALL=C awk -f progress.awk -v label=home -v status=FILE -v tty=1 -v cols=120 [-v throttle=0]
 #
 # Input lines (separated by \r or \n):
 #   " 123400 files..."                                               – file list scan
@@ -75,7 +75,7 @@ function clear_line() {
 /^building file list/ { next }
 
 / files to consider$/ {
-  total_files = $1
+  total_files = $1; files_done = 0
   clear_line()
   printf "    found %s files in %s\n", count(total_files), hms(now() - start)
   scan_done = now()
@@ -83,15 +83,26 @@ function clear_line() {
 }
 
 /^ *[0-9][0-9.,]*[KMGTP]? +[0-9]+% / {
-  size = $1; pct = $2 + 0; rate = $3; el = seconds($4)
+  size = $1; rate = $3; el = seconds($4)
   gsub(/,/, ".", size); gsub(/,/, ".", rate)
   if (match($0, /-chk=[0-9]+\/[0-9]+/)) {
     split(substr($0, RSTART + 5, RLENGTH - 5), fc, "/")
-    files = sprintf(" │ files %s/%s", count(fc[2] - fc[1]), count(fc[2]))
+    total_files = fc[2]; files_done = fc[2] - fc[1]
   }
-  eta = (pct >= 1 && pct < 100 && el >= 10) ? " │ ETA " hms(el * (100 - pct) / pct) : ""
-  # the line must fit the terminal, or \r cannot redraw it: the bar only on wide terminals
-  show(sprintf("%s%3d%% │ %s │ %s │ %s%s%s", (cols >= 100 ? bar(pct) " " : ""), pct, size, rate, hms(el), files, eta), 0)
+  if (total_files <= 0) {
+    show(sprintf("%s copied │ %s │ %s", size, rate, hms(el)), 0)
+    next
+  }
+  # Progress is measured in files, not rsync's own percentage: that one only counts the bytes
+  # transferred in this run, so a re-run over an existing backup would sit at 0% all the time.
+  pct = files_done * 100 / total_files
+  eta = (pct >= 0.5 && pct < 100 && el >= 10) ? " │ ETA " hms(el * (100 - pct) / pct) : ""
+  # the line must fit the terminal, or \r cannot redraw it: bar and files/s only on wide ones
+  wide = (cols >= 125)
+  show(sprintf("%s%5.1f%% │ files %s/%s%s │ %s%s │ %s │ %s%s",
+               (wide ? bar(pct) " " : ""), pct, count(files_done), count(total_files),
+               (wide && el > 0 ? sprintf(" (%s/s)", count(int(files_done / el))) : ""),
+               size, (wide ? " copied" : ""), rate, hms(el), eta), 0)
   next
 }
 

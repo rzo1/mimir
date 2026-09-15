@@ -116,14 +116,18 @@ all steps. Or pass the disk directly: `./mimir /Volumes/data`.
 
 ```
 ==> [3/4] Home folder  /Users/you/  →  /Volumes/data/mimir/MacBook_Pro/home/
-    found 4.14M files in 4m12s
-    ████████░░░░░░░░░░░░  40% │ 115.20G │ 110.25MB/s │ 17m26s │ files 1.66M/4.14M │ ETA 26m10s
+    found 5.24M files in 5m42s
+    ████████░░░░░░░░░░░░  40.2% │ files 2.11M/5.24M (1.3k/s) │ 115.20G copied │ 110.25MB/s │ 27m10s │ ETA 40m27s
 ```
 
 - Steps are numbered; inventory sections and the checksum comparison show a
   spinner with elapsed time.
-- The copy scans all files first, so percentage, file count and ETA refer to
-  the real totals (rsync needs roughly 1–2 GB of RAM for millions of files).
+- The copy scans all files first; percentage, bar and ETA are based on files
+  checked out of that total (rsync needs roughly 1–2 GB of RAM for millions of
+  files). On a re-run most files are already there, so progress moves fast
+  while little data is copied.
+- Folders with many tiny files (`~/.m2`, `node_modules`, generated docs) are
+  slow on external disks: every file costs several writes, whatever its size.
 - `./mimir --status /Volumes/data` follows a running backup from another
   terminal.
 - A macOS notification tells you when a run finished or failed.

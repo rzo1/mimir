@@ -170,6 +170,29 @@ test_rerun_copies_only_the_delta() {
   assert_contains "$log" "new.txt"
 }
 
+# macOS stamps com.apple.provenance on everything rsync creates; if the options don't ignore it,
+# every re-run rewrites the attributes of every file and directory (days on a USB disk).
+# rsync's log file omits attribute-only updates, so ask rsync itself, with Mímir's exact options.
+test_rerun_does_not_rewrite_attributes() {
+  require_macos
+  rsync3 >/dev/null || skip "needs rsync 3 (xattr support)"
+  mkdir -p home dst && make_home "$T/home"
+  # like most files in a real home folder, the originals carry no provenance attribute
+  # (per entry: "xattr -rd" stops at the first file that doesn't have the attribute)
+  find "$T/home" ! -type l -exec xattr -d com.apple.provenance {} \; 2>/dev/null || true
+  if xattr "$T/home/.zshrc" | grep -qx com.apple.provenance; then skip "cannot remove com.apple.provenance here"; fi
+  mimir_run --only home >>mimir.log 2>&1
+  local h; h="$(backup_dir)/home"
+  # shellcheck source=../lib/common.sh
+  . "$ROOT/lib/common.sh"
+  # shellcheck source=../lib/mirror.sh
+  . "$ROOT/lib/mirror.sh"
+  detect_rsync; DEST_FS=apfs; build_rsync_opts
+  "$RSYNC" "${RSYNC_OPTS[@]}" --info=progress0,flist0,stats0 -n -i --exclude-from="$ROOT/excludes.txt" \
+    "$T/home/" "$h/" >itemized.txt
+  assert_eq "$(grep -c . itemized.txt)" "0" "entries rsync would update on an unchanged re-run"
+}
+
 test_dry_run_copies_nothing() {
   require_macos
   mkdir -p home dst && make_home "$T/home"
@@ -367,12 +390,14 @@ test_progress_renderer() {
     printf '     90,21M  50%%   14,57MB/s    0:00:20\r'
     printf '\nNumber of files: 12.581 (reg: 10.313, dir: 2.268)\n'
   } >rsync.txt
-  awk -f "$ROOT/lib/progress.awk" -v label=home -v status="$T/status" -v tty=1 -v cols=120 -v throttle=0 <rsync.txt |
+  LC_ALL=C awk -f "$ROOT/lib/progress.awk" -v label=home -v status="$T/status" -v tty=1 -v cols=130 -v throttle=0 <rsync.txt |
     LC_ALL=C tr '\r' '\n' >out.txt
   assert_contains out.txt "found 12.6k files"
   assert_not_contains out.txt "building file list"
-  assert_contains out.txt " 10% │ 18.00M │ 15.05MB/s │ 0m10s │ files 2445/12.6k │ ETA 1m30s"
-  assert_contains out.txt " 50% │ 90.21M │ 14.57MB/s │ 0m20s │ files 2445/12.6k │ ETA 0m20s"
+  # progress is files checked / files found – not rsync's byte percentage (10% / 50% in the input)
+  assert_contains out.txt " 19.4% │ files 2445/12.6k (244/s) │ 18.00M copied │ 15.05MB/s │ 0m10s │ ETA 0m41s"
+  assert_contains out.txt " 19.4% │ files 2445/12.6k (122/s) │ 90.21M copied │ 14.57MB/s │ 0m20s │ ETA 1m22s"
+  assert_contains out.txt "███░"
   assert_contains out.txt "    Number of files: 12.581"
   assert_eq "$(sed -n 2p "$T/status")" "home"
   assert_contains "$T/status" "home finished"
@@ -380,9 +405,10 @@ test_progress_renderer() {
 
 test_progress_renderer_narrow_terminal_has_no_bar() {
   printf '     18,00M  10%%   15,05MB/s    0:00:10 (xfr#2000, to-chk=10136/12581)\n' |
-    awk -f "$ROOT/lib/progress.awk" -v label=home -v tty=1 -v cols=80 | LC_ALL=C tr '\r' '\n' >out.txt
+    LC_ALL=C awk -f "$ROOT/lib/progress.awk" -v label=home -v tty=1 -v cols=80 | LC_ALL=C tr '\r' '\n' >out.txt
   assert_not_contains out.txt "█"
-  assert_contains out.txt " 10% │"
+  assert_not_contains out.txt "/s)"
+  assert_contains out.txt " 19.4% │ files 2445/12.6k │ 18.00M │"
 }
 
 # --- runner ------------------------------------------------------------------------------------------
