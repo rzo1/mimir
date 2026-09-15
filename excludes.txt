@@ -22,6 +22,10 @@
 /Library/DuetExpertCenter/
 /Library/Trial/
 /Library/Daemon Containers/
+# cloud file provider bookkeeping; its tombstones can't be read even with Full Disk Access
+/Library/Application Support/FileProvider/
+# Control Center microphone/camera indicator settings, locked down by macOS
+/Library/Group Containers/group.com.apple.secure-control-center-preferences/
 
 # --- cloud providers (OneDrive, Google Drive, Dropbox …): data lives in the cloud, and reading ---
 # --- "online-only" placeholders would trigger a full download ------------------------------------
