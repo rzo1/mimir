@@ -113,8 +113,12 @@ function render(force,   t, el_now, pct, line, act_s, age, room, p, drop, i, n, 
   max = cols - 5
   act_s = ""
   if (act != "") {
-    age = t - act_time
+    age = t - act_time + fake_age  # fake_age: tests only
     act_s = act (age >= 10 ? " (" hms(age) " ago)" : "")
+    # after the last entry rsync revisits every folder to set its date, without any output
+    if (age >= 10 && total_files > 0 && (checked >= total_files || chk_done >= total_files)) {
+      act_s = "finishing: setting folder dates (no progress info from rsync)"; act_path = ""
+    }
   }
   # what rsync is doing right now matters more than bar and speed: keep room for it and ~20 columns
   # of its path
@@ -146,7 +150,9 @@ function render(force,   t, el_now, pct, line, act_s, age, room, p, drop, i, n, 
   # append the activity with as much of the path as fits
   if (act_s != "") {
     room = max - width(line) - 3
-    if (room >= width(act_s) + 2 + 12) {
+    if (act_path == "" && room >= width(act_s)) {
+      line = line " │ " act_s
+    } else if (room >= width(act_s) + 2 + 12) {
       p = act_path
       if (width(p) > room - width(act_s) - 2) {
         p = substr(p, length(p) - (room - width(act_s) - 2) + 2)

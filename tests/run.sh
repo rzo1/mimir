@@ -447,6 +447,15 @@ test_progress_renderer_shows_current_activity() {
   assert_contains out.txt " 83.3% │ files 5/6 .*│ creating link: link -> target"
 }
 
+# after the last entry rsync silently revisits all folders; a heartbeat 10+ seconds later (fake_age)
+# must explain that instead of showing the last copied file
+test_progress_renderer_explains_the_final_folder_pass() {
+  printf '2 files to consider\n.d          ./\n>f+++++++++ last.txt\n@tick\n' |
+    LC_ALL=C awk -f "$ROOT/lib/progress.awk" -v label=home -v tty=1 -v cols=200 -v throttle=0 \
+      -v fake_age=15 | LC_ALL=C tr '\r' '\n' >out.txt
+  assert_contains out.txt "100.0% │ files 2/2 .*│ finishing: setting folder dates"
+}
+
 test_progress_renderer_fits_the_terminal() {
   local cols
   for cols in 80 100 125 160; do
