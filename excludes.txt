@@ -1,0 +1,45 @@
+# rsync exclude patterns for the home folder mirror.
+# A leading "/" anchors the pattern at the home folder root; a trailing "/" matches directories only.
+# Comment a line out (#) to include it after all. Excluded paths are never deleted from the backup,
+# even with --delete.
+
+# --- pure caches: rebuilt automatically ---------------------------------------------------------
+/Library/Caches/
+/.cache/
+/Library/Containers/*/Data/Library/Caches/
+/Library/Group Containers/*/Library/Caches/
+/Library/Developer/Xcode/DerivedData/
+/Library/Developer/CoreSimulator/Caches/
+/.npm/_cacache/
+/.gradle/caches/
+/.gradle/wrapper/dists/
+/Library/Application Support/JetBrains/*/caches/
+/Library/Metadata/CoreSpotlight/
+.rsync-partial/
+
+# --- system-managed / not restorable anyway ----------------------------------------------------
+/Library/Biome/
+/Library/DuetExpertCenter/
+/Library/Trial/
+/Library/Daemon Containers/
+
+# --- cloud providers (OneDrive, Google Drive, Dropbox …): data lives in the cloud, and reading ---
+# --- "online-only" placeholders would trigger a full download ------------------------------------
+/Library/CloudStorage/
+
+# --- big and re-downloadable: decide yourself (comment out to include) ---------------------------
+# Trash
+/.Trash/
+# Docker Desktop VM disk with all images, containers AND volumes
+# If volumes hold data you need: docker run --rm -v VOL:/v -v "$PWD":/b alpine tar czf /b/VOL.tgz -C /v .
+/Library/Containers/com.docker.docker/Data/vms/
+# Ollama models – list is in inventory/dev/ollama-models.txt, re-pull with "ollama pull"
+/.ollama/models/
+# Maven local repository – re-downloadable, unless you "mvn install"ed artifacts that exist nowhere else.
+# /.m2/repository/
+
+# --- optional: uncomment to shrink the backup further --------------------------------------------
+# node_modules/
+# .venv/
+# /Library/Application Support/MobileSync/Backup/
+# /Movies/

@@ -1,0 +1,27 @@
+# System-wide locations (outside the home folder) copied to <backup>/system/ with their full path.
+# Only paths readable without sudo make sense here. Missing paths are skipped.
+
+# Homebrew configs and data (e.g. /opt/homebrew/var/postgresql@14 database files)
+/opt/homebrew/etc
+/opt/homebrew/var
+/usr/local/etc
+/usr/local/var
+
+# Standalone binaries dropped into /usr/local/bin by installers
+/usr/local/bin
+
+# Network / shell config
+/etc/hosts
+/etc/paths
+/etc/paths.d
+/etc/resolver
+/etc/zshrc
+/etc/zprofile
+/etc/ssh/ssh_config
+/etc/ssh/ssh_config.d
+
+# Machine-wide launch agents/daemons, fonts and ColorSync profiles installed by you
+/Library/LaunchAgents
+/Library/LaunchDaemons
+/Library/Fonts
+/Library/ColorSync/Profiles

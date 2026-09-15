@@ -1,0 +1,275 @@
+#!/bin/bash
+# Mímir — back up everything important of a Mac (home folder, system-wide configs, software
+# inventory, private keys) to an external disk. Safe to re-run: only changes are copied.
+set -o pipefail
+
+SCRIPT_DIR=$(cd "$(dirname "$0")" && pwd)
+# shellcheck source=lib/common.sh
+. "$SCRIPT_DIR/lib/common.sh"
+# shellcheck source=lib/inventory.sh
+. "$SCRIPT_DIR/lib/inventory.sh"
+# shellcheck source=lib/secrets.sh
+. "$SCRIPT_DIR/lib/secrets.sh"
+# shellcheck source=lib/mirror.sh
+. "$SCRIPT_DIR/lib/mirror.sh"
+# shellcheck source=lib/volumes.sh
+. "$SCRIPT_DIR/lib/volumes.sh"
+# shellcheck source=lib/requirements.sh
+. "$SCRIPT_DIR/lib/requirements.sh"
+
+PATH="/opt/homebrew/bin:/opt/homebrew/sbin:/usr/local/bin:$PATH"
+ALL_STEPS="inventory secrets home system verify"
+
+usage() {
+  cat <<EOF
+Usage: $(basename "$0") [options] [destination]
+
+Mirror this Mac to <destination> (a folder on the external disk, e.g. /Volumes/Backup).
+Without a destination you get a list of connected disks to choose from.
+Everything goes to <destination>/mimir/<computer-name>/. Re-run any time: only the delta is copied.
+
+Steps (default: inventory secrets home system):
+  inventory   Brewfile, apps (+ which to reinstall manually), toolchains, git repos with unpushed
+              work, macOS settings, launch agents, network, key fingerprints
+  secrets     GPG secret/public keys + ownertrust export, ~/.ssh, optional keychain identities
+  home        rsync of your whole home folder incl. hidden files (minus excludes.txt)
+  system      rsync of the paths in system-paths.txt (/opt/homebrew/etc, /etc/hosts, ...)
+  verify      checksum comparison of home vs. backup (slow, opt-in)
+
+Options:
+  -n, --dry-run            show what would be transferred; copies nothing
+      --delete             exact mirror: remove files from the backup that are gone on the Mac
+                           (they are moved to _removed/<timestamp>/ rather than really deleted)
+      --only STEPS         run only these steps (comma separated), e.g. --only inventory,secrets
+      --skip STEPS         skip these steps (comma separated)
+      --verify             add the verify step after copying
+      --export-secrets     re-export GPG keys even if unchanged since the last run
+      --keychain-identities  also export certificates+private keys from the login keychain (.p12)
+      --excludes FILE      exclude list for the home mirror (default: excludes.txt)
+      --system-paths FILE  path list for the system step (default: system-paths.txt)
+      --status             follow a running backup (progress, ETA) from another terminal
+      --check              only check requirements (and the destination, if given); copy nothing
+      --allow-internal     allow a destination on the internal disk (for testing)
+  -y, --yes                don't ask questions, accept warnings (never installs software)
+  -h, --help               this help
+
+Examples:
+  mimir                                  choose the disk from a list, run everything
+  mimir -n /Volumes/data                 dry run
+  mimir /Volumes/data                    first run; repeat later to copy only the delta
+  mimir --delete --verify /Volumes/data  final exact mirror with checksum check
+  mimir --status /Volumes/data           watch a running backup from another terminal
+  mimir --check /Volumes/data            check tools, permissions and the disk
+EOF
+}
+
+# ---------------------------------------------------------------------------------------------------
+STATUS_MODE=0 CHECK_ONLY=0 DRY_RUN=0 DELETE=0 VERIFY=0 ASSUME_YES=0 FORCE_SECRETS=0 KEYCHAIN_IDENTITIES=0 ALLOW_INTERNAL=0
+STEPS="inventory secrets home system"
+EXCLUDES="$SCRIPT_DIR/excludes.txt"
+SYSTEM_PATHS="$SCRIPT_DIR/system-paths.txt"
+DEST=""
+
+need_arg() { [ -n "$2" ] || die "$1 needs an argument"; }
+while [ $# -gt 0 ]; do
+  case "$1" in
+    -n|--dry-run) DRY_RUN=1 ;;
+    --delete) DELETE=1 ;;
+    --only) need_arg "$1" "$2"; STEPS=$(echo "$2" | tr ',' ' '); shift ;;
+    --skip) need_arg "$1" "$2"; for s in $(echo "$2" | tr ',' ' '); do STEPS=$(echo " $STEPS " | sed "s/ $s / /; s/^ *//; s/ *$//"); done; shift ;;
+    --verify) VERIFY=1 ;;
+    --export-secrets) FORCE_SECRETS=1 ;;
+    --keychain-identities) KEYCHAIN_IDENTITIES=1 ;;
+    --excludes) need_arg "$1" "$2"; EXCLUDES="$2"; shift ;;
+    --system-paths) need_arg "$1" "$2"; SYSTEM_PATHS="$2"; shift ;;
+    --allow-internal) ALLOW_INTERNAL=1 ;;
+    --status) STATUS_MODE=1 ;;
+    --check) CHECK_ONLY=1 ;;
+    -y|--yes) ASSUME_YES=1 ;;
+    -h|--help) usage; exit 0 ;;
+    -*) die "unknown option $1 (see --help)" ;;
+    *) [ -z "$DEST" ] || die "only one destination allowed"; DEST="$1" ;;
+  esac
+  shift
+done
+
+[ "$VERIFY" = 1 ] && STEPS="$STEPS verify"
+for s in $STEPS; do
+  case " $ALL_STEPS " in *" $s "*) ;; *) die "unknown step '$s' (valid: $ALL_STEPS)" ;; esac
+done
+has_step() { case " $STEPS " in *" $1 "*) return 0 ;; *) return 1 ;; esac; }
+
+require_macos
+[ "$(id -u)" != 0 ] || die "don't run Mímir with sudo – run it as the user whose data you want to back up"
+# MIMIR_SOURCE only exists to test the tool against a small folder
+SRC_HOME="${MIMIR_SOURCE:-$HOME}"
+
+if [ "$CHECK_ONLY" = 1 ] && [ -z "$DEST" ]; then
+  check_requirements
+  printf '\n'; ok "requirements checked (pass a destination to check the disk too)"
+  exit 0
+fi
+if [ -z "$DEST" ]; then
+  [ -t 0 ] || { usage; exit 1; }
+  pick_volume
+fi
+[ -d "$DEST" ] || die "destination '$DEST' does not exist – is the disk mounted? (ls /Volumes)"
+[ -f "$EXCLUDES" ] || die "exclude list '$EXCLUDES' not found"
+DEST=$(cd "$DEST" && pwd -P)
+
+HOST=$(scutil --get ComputerName 2>/dev/null || hostname -s)
+HOST_SAFE=$(printf '%s' "$HOST" | tr -c 'A-Za-z0-9._-' '_')
+HOST_DIR="$DEST/mimir/$HOST_SAFE"
+INV_DIR="$HOST_DIR/inventory"
+SECRETS_DIR="$HOST_DIR/secrets"
+LOG_DIR="$HOST_DIR/logs"
+STATUS_FILE="$HOST_DIR/.progress"
+TS=$(date +%Y%m%d-%H%M%S)
+START=$(date +%s)
+RUN_LOG=""
+
+# ---------------------------------------------------------------------------------------------------
+check_destination() {
+  step "Destination"
+
+  local dev dinfo
+  if [ "$(stat -f %d "$DEST")" = "$(stat -f %d "$SRC_HOME")" ] && [ "$ALLOW_INTERNAL" != 1 ]; then
+    die "'$DEST' is on the same disk as your home folder – pick the external disk (/Volumes/...)"
+  fi
+
+  dev=$(stat -f %Sd "$DEST")
+  dinfo=$(diskutil info "$dev" 2>/dev/null)
+  DEST_FS=$(printf '%s\n' "$dinfo" | awk -F: '/Type \(Bundle\)/ { gsub(/ /, "", $2); print $2 }')
+  local mount name avail_kb used_kb
+  mount=$(printf '%s\n' "$dinfo" | sed -n 's/^ *Mount Point: *//p')
+  name=$(printf '%s\n' "$dinfo" | sed -n 's/^ *Volume Name: *//p')
+  info "destination: $HOST_DIR"
+  info "volume: ${name:-?} ($mount), file system: ${DEST_FS:-unknown}"
+
+  case "$DEST_FS" in
+    apfs|hfs) ok "file system keeps permissions, extended attributes and symlinks" ;;
+    exfat|msdos)
+      warn "$DEST_FS cannot store permissions, extended attributes or symlinks, and FAT32 caps files at 4 GB." \
+           "Recommended: erase the disk in Disk Utility as 'APFS (Encrypted)'."
+      confirm "Continue with $DEST_FS anyway?" || exit 1 ;;
+    ntfs) die "NTFS is read-only on macOS – reformat the disk as APFS (Encrypted)" ;;
+    *) warn "unknown file system '$DEST_FS'"; confirm "Continue anyway?" || exit 1 ;;
+  esac
+
+  if printf '%s\n' "$dinfo" | grep -Eq '^ *(FileVault|Encrypted): *Yes'; then
+    ok "destination volume is encrypted"
+  else
+    warn "destination volume is NOT encrypted, but the backup will contain SSH/GPG private keys," \
+         "keychains, browser sessions and tokens. Anyone holding the disk can read them." \
+         "Fix: Finder → right-click the disk → Encrypt, or Disk Utility → Erase → 'APFS (Encrypted)'."
+    confirm "Continue with an unencrypted disk?" || exit 1
+  fi
+
+  avail_kb=$(df -k "$DEST" | awk 'NR == 2 { print $4 }')
+  used_kb=$(df -k "$SRC_HOME" | awk 'NR == 2 { print $3 }')
+  info "free on destination: $(human_kb "$avail_kb"), used on this Mac (whole data volume): $(human_kb "$used_kb")"
+  if [ ! -d "$HOST_DIR/home" ] && [ "$avail_kb" -lt "$used_kb" ] 2>/dev/null; then
+    warn "the destination may be too small; excludes.txt skips caches etc., but check the numbers above"
+  fi
+
+  build_rsync_opts
+}
+
+on_interrupt() {
+  printf '\n'
+  err "Interrupted. Just run the same command again – finished files are not copied twice."
+  exit 130
+}
+
+cleanup() {
+  spin_interrupt
+  [ "$(cat "$HOST_DIR/.lock" 2>/dev/null)" = "$$" ] && rm -f "$HOST_DIR/.lock" "$STATUS_FILE"
+}
+
+status_write() {  # status_write LABEL TEXT — what --status shows between rsync progress updates
+  printf '%s\n%s\n%s\n' "$(date +%s)" "$1" "$2" >"$STATUS_FILE" 2>/dev/null
+}
+
+main() {
+  check_requirements
+  check_destination
+  if [ "$CHECK_ONLY" = 1 ]; then
+    printf '\n'
+    ok "all checks done – nothing was copied ($WARNINGS warning(s))"
+    exit 0
+  fi
+
+  step "Plan"
+  info "steps:  $STEPS"
+  info "source: $SRC_HOME"
+  info "target: $HOST_DIR"
+  [ "$DRY_RUN" = 1 ] && info "mode:   DRY RUN – nothing will be copied"
+  if [ "$DELETE" = 1 ]; then
+    info "mode:   --delete – files removed on the Mac are moved to _removed/$TS/ in the backup"
+  else
+    info "mode:   additive – files deleted on the Mac stay in the backup (use --delete for an exact mirror)"
+  fi
+  confirm "Start?" || exit 1
+
+  mkdir -p "$LOG_DIR" || die "cannot write to $HOST_DIR"
+  local other
+  other=$(cat "$HOST_DIR/.lock" 2>/dev/null)
+  if [ -n "$other" ] && kill -0 "$other" 2>/dev/null; then
+    die "another Mímir run (PID $other) is writing to this backup – follow it with: $0 --status \"$DEST\""
+  fi
+  echo $$ >"$HOST_DIR/.lock"
+  trap cleanup EXIT
+  trap on_interrupt INT TERM
+  RUN_LOG="$LOG_DIR/run-$TS.log"
+  _to_log "mimir started: steps=[$STEPS] dry_run=$DRY_RUN delete=$DELETE source=$SRC_HOME"
+  info "follow progress from another terminal: $0 --status \"$DEST\""
+
+  # keep the Mac (and the disk) awake while we run
+  caffeinate -dims -w $$ &
+
+  local failed="" n=0 total
+  total=$(echo "$STEPS" | wc -w | tr -d ' ')
+  for s in $ALL_STEPS; do
+    has_step "$s" || continue
+    n=$((n + 1)); STEP_TAG="[$n/$total] "
+    status_write "$s" "step $n of $total running"
+    "run_$s" || failed="$failed $s"
+  done
+  STEP_TAG=""
+
+  if [ "$DRY_RUN" != 1 ]; then
+    cp "$SCRIPT_DIR/RESTORE.md" "$HOST_DIR/RESTORE.md"
+    # ship the tool with the backup, so it can be reused from the disk
+    "$RSYNC" -a --delete --exclude=.git/ "$SCRIPT_DIR/" "$HOST_DIR/_tool/" 2>/dev/null
+    {
+      echo "last run:  $(date)"
+      echo "steps:     $STEPS"
+      echo "delete:    $DELETE"
+      echo "failed:    ${failed:-none}"
+      echo "warnings:  $WARNINGS"
+      echo "duration:  $(elapsed "$START")"
+    } >"$HOST_DIR/last-run.txt"
+  fi
+
+  step "Summary"
+  info "duration: $(elapsed "$START"), warnings: $WARNINGS"
+  if [ -n "$failed" ]; then
+    err "failed steps:$failed – check $LOG_DIR and re-run"
+    notify "Backup incomplete" "Failed:$failed – see logs, then re-run"
+    exit 1
+  fi
+  notify "Backup finished" "$(elapsed "$START"), $WARNINGS warning(s) – $HOST_SAFE"
+  ok "backup at $HOST_DIR"
+  if has_step inventory && [ "$DRY_RUN" != 1 ]; then
+    info "review before wiping the Mac:"
+    info "  $INV_DIR/dev/git-repos-ATTENTION.txt   (unpushed/uncommitted work)"
+    info "  $INV_DIR/apps/REINSTALL-MANUALLY.txt   (apps not from Homebrew/App Store)"
+  fi
+  info "then read RESTORE.md / README.md (pre-return checklist)"
+}
+
+if [ "$STATUS_MODE" = 1 ]; then
+  show_status
+  exit 0
+fi
+main

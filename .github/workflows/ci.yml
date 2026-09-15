@@ -1,0 +1,40 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: shellcheck
+        run: shellcheck -x mimir lib/*.sh tests/run.sh
+      - name: bash syntax
+        run: for f in mimir lib/*.sh tests/run.sh; do bash -n "$f"; done
+
+  test:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # the real thing: rsync 3 from Homebrew, GnuPG for the key export tests
+          - os: macos-latest
+            name: macOS
+          # CLI, progress renderer, inventory helpers; macOS-only tests are skipped
+          - os: ubuntu-latest
+            name: Linux
+    name: test (${{ matrix.name }})
+    steps:
+      - uses: actions/checkout@v7
+      - name: Install rsync 3 and GnuPG
+        if: runner.os == 'macOS'
+        env:
+          HOMEBREW_NO_AUTO_UPDATE: 1
+          HOMEBREW_NO_INSTALL_CLEANUP: 1
+        run: brew install rsync gnupg
+      - name: Tests
+        run: tests/run.sh
