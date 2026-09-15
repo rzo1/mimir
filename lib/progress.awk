@@ -1,5 +1,7 @@
 # Renders rsync's output as one live status line and mirrors it to a status file.
-# Usage: … | LC_ALL=C awk -f progress.awk -v label=home -v status=FILE -v tty=1 -v cols=120 [-v throttle=0]
+# Usage: … | LC_ALL=C awk -f progress.awk -v label=home -v status=FILE -v changes=FILE -v tty=1 -v cols=120
+#            [-v throttle=0]
+# changes: every entry rsync created, updated or deleted is written there (up-to-date ones are not)
 #
 # Input lines (separated by \r or \n), rsync's stdout merged with a heartbeat by run_rsync:
 #   " 123400 files..."                                                  – file list scan
@@ -174,6 +176,7 @@ function render(force,   t, el_now, pct, line, act_s, age, room, p, drop, i, n, 
   code = substr($0, 1, 11)
   if (code !~ /^\*/) checked++  # deletions are not part of the file list
   act = describe(code); act_path = substr($0, 13); act_time = now()
+  if (changes != "" && act != "checking") print $0 > changes
   if (phase == "scan") { phase = "transfer"; scan_done = act_time }
   render(0)
   next
@@ -218,6 +221,7 @@ function render(force,   t, el_now, pct, line, act_s, age, room, p, drop, i, n, 
 }
 
 END {
+  if (changes != "") close(changes)
   if (last_draw) show(sprintf("%s finished after %s", label, hms(now() - start)), 1)
   clear_line()
 }

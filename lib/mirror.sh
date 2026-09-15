@@ -49,6 +49,9 @@ build_rsync_opts() {
     # openrsync has no xattr/ACL support at all
     RSYNC_OPTS+=(--partial --stats)
   fi
+  # --no-dir-times: folder dates are not copied, which also skips rsync's final pass over every
+  # folder (slow on hard disks). File dates are always kept.
+  [ "$NO_DIR_TIMES" = 1 ] && RSYNC_OPTS+=(-O)
   # FAT/exFAT have 2s timestamp resolution – without this every file looks changed on every run
   [ "$native" = 1 ] || RSYNC_OPTS+=(--modify-window=2)
   RSYNC_OPTS+=(--exclude=.rsync-partial/)
@@ -58,6 +61,7 @@ build_rsync_opts() {
 run_rsync() {
   local label="$1" dst="$2"; shift 2
   local log="$LOG_DIR/rsync-$label-$TS.log" errlog="$LOG_DIR/rsync-$label-$TS.errors.log" rc=0
+  local changes="$LOG_DIR/rsync-$label-$TS.changes.log"
   local opts
   opts=("${RSYNC_OPTS[@]}" "${EXTRA_OPTS[@]}")
   [ "$DRY_RUN" = 1 ] && opts+=(--dry-run)
@@ -67,12 +71,16 @@ run_rsync() {
   fi
   [ "$DRY_RUN" = 1 ] || mkdir -p "$dst"
 
-  info "log: $log"
   if [ "$RSYNC_FLAVOR" = samba ]; then
-    run_rsync_with_progress "$label" "$errlog" "${opts[@]}" --log-file="$log" --log-file-format='%i %n%L' \
+    info "log: $log"
+    info "changes: $changes"
+    # the log gets rsync's messages and statistics only; the renderer writes the changed entries,
+    # otherwise the log would also list every up-to-date file (--info=name2)
+    run_rsync_with_progress "$label" "$errlog" "$changes" "${opts[@]}" --log-file="$log" --log-file-format='' \
       "$@" "$dst"
     rc=$?
   else
+    info "log: $log"
     spin_start "copying with openrsync (no progress available – brew install rsync)"
     "$RSYNC" "${opts[@]}" -i "$@" "$dst" >"$log" 2>"$errlog" || rc=$?
     spin_stop
@@ -93,21 +101,21 @@ run_rsync() {
   return 0
 }
 
-# run_rsync_with_progress LABEL ERRLOG rsync-args… — returns rsync's exit code
+# run_rsync_with_progress LABEL ERRLOG CHANGES rsync-args… — returns rsync's exit code
 #
 # rsync prints progress only while it copies file contents; checking up-to-date files or fixing
 # metadata is silent. So rsync also reports every entry it checks (--info=name2 with an itemized
 # --out-format), and a heartbeat keeps the elapsed time moving. Both reach the renderer through a
 # named pipe.
 run_rsync_with_progress() {
-  local label="$1" errlog="$2"; shift 2
+  local label="$1" errlog="$2" changes="$3"; shift 3
   local tty=0 cols=80 fifo rc
   if [ -t 1 ]; then tty=1; cols=$(stty size </dev/tty 2>/dev/null | awk '{ print $2 }'); fi
   fifo="${TMPDIR:-/tmp}/mimir-$$-$label.fifo"
   rm -f "$fifo"; mkfifo "$fifo" || { err "cannot create $fifo"; return 1; }
 
   LC_ALL=C awk -f "$SCRIPT_DIR/lib/progress.awk" -v label="$label" -v status="$STATUS_FILE" \
-    -v tty="$tty" -v cols="$cols" <"$fifo" &
+    -v changes="$changes" -v tty="$tty" -v cols="$cols" <"$fifo" &
   local renderer=$!
   exec 3>"$fifo"
   ( while sleep 2; do echo "@tick" || exit 0; done ) >&3 &

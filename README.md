@@ -39,7 +39,7 @@ afterwards).
 ├── secrets/
 │   ├── gpg/                secret + public keys (armored), ownertrust, revocation certificates
 │   └── ssh/                copy of ~/.ssh
-├── logs/                   run log, rsync log and error list per run
+├── logs/                   per run: run log, rsync log, list of changes, errors
 ├── _removed/<timestamp>/   what --delete removed from the backup
 ├── RESTORE.md              how to get it all back
 └── _tool/                  a copy of Mímir, runnable from the disk
@@ -111,6 +111,11 @@ all steps. Or pass the disk directly: `./mimir /Volumes/data`.
 - Before the final run, quit what writes constantly (Docker, databases, IDEs,
   Mail, browsers), so their data is copied in a consistent state.
 - The Mac is kept awake while Mímir runs. Plug in the power adapter.
+- Don't stop a run at 100%: rsync then silently goes over every folder once more
+  to set its date (the line says `finishing: setting folder dates`). On a hard
+  disk with hundreds of thousands of folders that takes a while. To skip this
+  pass, use `--no-dir-times` — on every run, because a single run without it
+  repairs all folder dates again. File dates are always kept.
 
 ### Progress
 
@@ -145,6 +150,7 @@ all steps. Or pass the disk directly: `./mimir /Volumes/data`.
 | `-n`, `--dry-run`       | Show what would be transferred; copy nothing                                |
 | `--delete`              | Exact mirror: files gone from the Mac are removed from the backup (moved to `_removed/<timestamp>/`, not deleted) |
 | `--verify`              | Compare the home mirror with the Mac by checksum after copying              |
+| `--no-dir-times`        | Don't copy folder dates; skips rsync's slow final pass over all folders     |
 | `--only STEPS`          | Run only these steps, e.g. `--only inventory,secrets`                       |
 | `--skip STEPS`          | Skip steps, e.g. `--skip secrets`                                           |
 | `--export-secrets`      | Re-export GPG keys even if they are unchanged since the last run            |
@@ -257,6 +263,9 @@ Don't copy the whole `home/Library` onto a new machine; take what you need.
   in `excludes.txt`.
 - **"another Mímir run is writing to this backup"** — follow it with
   `--status`. A lock left behind by a crashed run is ignored automatically.
+- **What did a run change?** — `logs/rsync-<step>-<timestamp>.changes.log`
+  lists every created, updated and deleted entry; the `.log` next to it has
+  rsync's messages and statistics.
 
 ## Development
 

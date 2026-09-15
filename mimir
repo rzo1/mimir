@@ -43,6 +43,8 @@ Options:
       --only STEPS         run only these steps (comma separated), e.g. --only inventory,secrets
       --skip STEPS         skip these steps (comma separated)
       --verify             add the verify step after copying
+      --no-dir-times       don't copy folder dates: skips rsync's slow final pass over all folders
+                           (use it on every run – one run without it repairs all folder dates)
       --export-secrets     re-export GPG keys even if unchanged since the last run
       --keychain-identities  also export certificates+private keys from the login keychain (.p12)
       --excludes FILE      exclude list for the home mirror (default: excludes.txt)
@@ -64,7 +66,7 @@ EOF
 }
 
 # ---------------------------------------------------------------------------------------------------
-STATUS_MODE=0 CHECK_ONLY=0 DRY_RUN=0 DELETE=0 VERIFY=0 ASSUME_YES=0 FORCE_SECRETS=0 KEYCHAIN_IDENTITIES=0 ALLOW_INTERNAL=0
+STATUS_MODE=0 CHECK_ONLY=0 DRY_RUN=0 DELETE=0 VERIFY=0 NO_DIR_TIMES=0 ASSUME_YES=0 FORCE_SECRETS=0 KEYCHAIN_IDENTITIES=0 ALLOW_INTERNAL=0
 STEPS="inventory secrets home system"
 EXCLUDES="$SCRIPT_DIR/excludes.txt"
 SYSTEM_PATHS="$SCRIPT_DIR/system-paths.txt"
@@ -78,6 +80,7 @@ while [ $# -gt 0 ]; do
     --only) need_arg "$1" "$2"; STEPS=$(echo "$2" | tr ',' ' '); shift ;;
     --skip) need_arg "$1" "$2"; for s in $(echo "$2" | tr ',' ' '); do STEPS=$(echo " $STEPS " | sed "s/ $s / /; s/^ *//; s/ *$//"); done; shift ;;
     --verify) VERIFY=1 ;;
+    --no-dir-times) NO_DIR_TIMES=1 ;;
     --export-secrets) FORCE_SECRETS=1 ;;
     --keychain-identities) KEYCHAIN_IDENTITIES=1 ;;
     --excludes) need_arg "$1" "$2"; EXCLUDES="$2"; shift ;;
@@ -212,6 +215,7 @@ main() {
   else
     info "mode:   additive – files deleted on the Mac stay in the backup (use --delete for an exact mirror)"
   fi
+  [ "$NO_DIR_TIMES" = 1 ] && info "folder dates: not copied (--no-dir-times)"
   confirm "Start?" || exit 1
 
   mkdir -p "$LOG_DIR" || die "cannot write to $HOST_DIR"

@@ -184,9 +184,30 @@ test_rerun_copies_only_the_delta() {
   echo new >"$T/home/new.txt"
   sleep 1  # new run → new timestamp → new log file
   mimir_run --only home >>mimir.log 2>&1
-  local log; log=$(ls -t "$(backup_dir)"/logs/rsync-home-*.log | head -1)
-  assert_eq "$(grep -c ' >f' "$log")" "1" "files transferred in second run"
-  assert_contains "$log" "new.txt"
+  local changes log
+  changes=$(ls -t "$(backup_dir)"/logs/rsync-home-*.changes.log | head -1)
+  log=$(ls -t "$(backup_dir)"/logs/rsync-home-*[0-9].log | head -1)
+  assert_eq "$(grep -c '^>f' "$changes")" "1" "files transferred in second run"
+  assert_contains "$changes" "new.txt"
+  # up-to-date entries are neither changes nor logged (rsync reports them to the progress line only)
+  assert_not_contains "$changes" "^\.f  "
+  assert_not_contains "$log" "\.zshrc"
+  assert_contains "$log" "total size"
+}
+
+test_no_dir_times() {
+  require_macos
+  mkdir -p home dst && make_home "$T/home"
+  touch -t 202001010000 "$T/home/.config/app" "$T/home/My Docs"
+  mimir_run --only home >>mimir.log 2>&1
+  local h; h="$(backup_dir)/home"
+  assert_eq "$(stat -f %m "$h/My Docs")" "$(stat -f %m "$T/home/My Docs")" "folder date copied by default"
+
+  rm -rf "$T/dst" && mkdir "$T/dst"
+  mimir_run --no-dir-times --only home >out.txt 2>&1
+  assert_contains out.txt "folder dates: not copied"
+  [ "$(stat -f %m "$h/My Docs")" != "$(stat -f %m "$T/home/My Docs")" ] || fail "folder date copied despite --no-dir-times"
+  assert_eq "$(stat -f %m "$h/My Docs/file 1.txt")" "$(stat -f %m "$T/home/My Docs/file 1.txt")" "file dates always kept"
 }
 
 # macOS stamps com.apple.provenance on everything rsync creates; if the options don't ignore it,
