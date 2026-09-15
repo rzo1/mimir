@@ -89,6 +89,11 @@ test_help() {
   assert_contains out.txt "--check"
 }
 
+test_version() {
+  "$MIMIR" --version >out.txt
+  assert_eq "$(cat out.txt)" "mimir $(sed -n 's/^MIMIR_VERSION="\(.*\)"$/\1/p' "$MIMIR")"
+}
+
 test_unknown_option_fails() {
   if "$MIMIR" --bogus >out.txt 2>&1; then fail "expected failure"; fi
   assert_contains out.txt "unknown option --bogus"

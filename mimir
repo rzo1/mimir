@@ -17,6 +17,7 @@ SCRIPT_DIR=$(cd "$(dirname "$0")" && pwd)
 # shellcheck source=lib/requirements.sh
 . "$SCRIPT_DIR/lib/requirements.sh"
 
+MIMIR_VERSION="0.1.0"
 PATH="/opt/homebrew/bin:/opt/homebrew/sbin:/usr/local/bin:$PATH"
 ALL_STEPS="inventory secrets home system verify"
 
@@ -53,6 +54,7 @@ Options:
       --check              only check requirements (and the destination, if given); copy nothing
       --allow-internal     allow a destination on the internal disk (for testing)
   -y, --yes                don't ask questions, accept warnings (never installs software)
+  -V, --version            print the version
   -h, --help               this help
 
 Examples:
@@ -90,6 +92,7 @@ while [ $# -gt 0 ]; do
     --check) CHECK_ONLY=1 ;;
     -y|--yes) ASSUME_YES=1 ;;
     -h|--help) usage; exit 0 ;;
+    -V|--version) echo "mimir $MIMIR_VERSION"; exit 0 ;;
     -*) die "unknown option $1 (see --help)" ;;
     *) [ -z "$DEST" ] || die "only one destination allowed"; DEST="$1" ;;
   esac
@@ -228,7 +231,7 @@ main() {
   trap cleanup EXIT
   trap on_interrupt INT TERM
   RUN_LOG="$LOG_DIR/run-$TS.log"
-  _to_log "mimir started: steps=[$STEPS] dry_run=$DRY_RUN delete=$DELETE source=$SRC_HOME"
+  _to_log "mimir $MIMIR_VERSION started: steps=[$STEPS] dry_run=$DRY_RUN delete=$DELETE source=$SRC_HOME"
   info "follow progress from another terminal: $0 --status \"$DEST\""
 
   # keep the Mac (and the disk) awake while we run
@@ -250,6 +253,7 @@ main() {
     "$RSYNC" -a --delete --exclude=.git/ "$SCRIPT_DIR/" "$HOST_DIR/_tool/" 2>/dev/null
     {
       echo "last run:  $(date)"
+      echo "version:   $MIMIR_VERSION"
       echo "steps:     $STEPS"
       echo "delete:    $DELETE"
       echo "failed:    ${failed:-none}"

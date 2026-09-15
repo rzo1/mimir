@@ -68,7 +68,7 @@ copying anything; every run does the same checks first.
 ## Installation
 
 ```bash
-git clone https://github.com/rzo1/mimir.git
+git clone --branch v0.1.0 https://github.com/rzo1/mimir.git
 cd mimir
 brew install rsync      # recommended
 ./mimir --check
@@ -161,6 +161,7 @@ all steps. Or pass the disk directly: `./mimir /Volumes/data`.
 | `--check`               | Only check requirements and the destination                                 |
 | `-y`, `--yes`           | Answer all questions with yes (never installs software)                     |
 | `--allow-internal`      | Allow a destination on the internal disk (testing only)                     |
+| `-V`, `--version`       | Print the version                                                           |
 
 ## What is backed up
 
