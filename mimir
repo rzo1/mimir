@@ -1,6 +1,13 @@
 #!/bin/bash
 # Mímir — back up everything important of a Mac (home folder, system-wide configs, software
 # inventory, private keys) to an external disk. Safe to re-run: only changes are copied.
+# Bash reads a script lazily, from a byte offset, so editing this file while a run is in
+# progress makes the running shell resume mid-line — a run of hours dies in the last
+# minute. The brace group is a single command, so bash parses the whole script before
+# running any of it, and the exit in front of the closing brace keeps it from ever
+# reading the file again.
+{
+
 set -o pipefail
 
 SCRIPT_DIR=$(cd "$(dirname "$0")" && pwd)
@@ -284,3 +291,5 @@ if [ "$STATUS_MODE" = 1 ]; then
   exit 0
 fi
 main
+exit $?
+} # end of the parse-before-run guard
